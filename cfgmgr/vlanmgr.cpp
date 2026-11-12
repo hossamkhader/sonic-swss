@@ -664,6 +664,17 @@ void VlanMgr::doVlanMemberTask(Consumer &consumer)
                 continue;
             }
 
+            if (m_pacRoutedPorts.count(port_alias))
+            {
+                /* PAC is using the port as a routed port: remember the membership and program it
+                   when PAC releases the port. */
+                SWSS_LOG_NOTICE("%s is a PAC routed port, deferring %s", port_alias.c_str(), kfvKey(t).c_str());
+                m_PortVlanMember[port_alias][vlan_alias] = tagging_mode;
+                m_vlanMemberReplay.erase(kfvKey(t));
+                it = consumer.m_toSync.erase(it);
+                continue;
+            }
+
             if (addHostVlanMember(vlan_id, port_alias, tagging_mode))
             {
                 key = VLAN_PREFIX + to_string(vlan_id);
@@ -688,7 +699,12 @@ void VlanMgr::doVlanMemberTask(Consumer &consumer)
         }
         else if (op == DEL_COMMAND)
         {
-            if (isVlanMemberStateOk(kfvKey(t)))
+            if (m_pacRoutedPorts.count(port_alias))
+            {
+                /* Not programmed while PAC uses the port as a routed port. */
+                m_PortVlanMember[port_alias].erase(vlan_alias);
+            }
+            else if (isVlanMemberStateOk(kfvKey(t)))
             {
                 removeHostVlanMember(vlan_id, port_alias);
                 key = VLAN_PREFIX + to_string(vlan_id);
@@ -740,13 +756,19 @@ void VlanMgr::doVlanPacPortTask(Consumer &consumer)
         if (op == SET_COMMAND)
         {
             string learn_mode;
+            bool pac_routed = false;
             for (auto i : kfvFieldsValues(t))
             {
                 if (fvField(i) == "learn_mode")
                 {
                     learn_mode = fvValue(i);
                 }
+                else if (fvField(i) == "pac_routed")
+                {
+                    pac_routed = (fvValue(i) == "true");
+                }
             }
+            pacRoutedPortSet(alias, pac_routed);
             if (!learn_mode.empty())
             {
                 SWSS_LOG_NOTICE("set port learn mode port %s learn_mode %s\n", alias.c_str(), learn_mode.c_str());
@@ -758,6 +780,7 @@ void VlanMgr::doVlanPacPortTask(Consumer &consumer)
         }
         else if (op == DEL_COMMAND)
         {
+            pacRoutedPortSet(alias, false);
             if (isMemberStateOk(alias))
             {
                 vector<FieldValueTuple> fvVector;
@@ -767,6 +790,58 @@ void VlanMgr::doVlanPacPortTask(Consumer &consumer)
             }
         }
         it = consumer.m_toSync.erase(it);
+    }
+}
+
+/*
+ * PAC dynamic IPv6 multi-tenancy turns an L2 access port into a routed port while tenant sessions
+ * are authorized on it (STATE_DB OPER_PORT field "pac_routed"). Routed: take the port out of its
+ * configured VLANs, which also detaches it from the bridge, so a router interface can be created on
+ * it. Released: put the configured memberships back. CONFIG_DB is never modified.
+ */
+void VlanMgr::pacRoutedPortSet(const std::string& port_alias, bool routed)
+{
+    bool isRouted = m_pacRoutedPorts.count(port_alias) != 0;
+    if (routed == isRouted)
+    {
+        return;
+    }
+
+    auto vlans = m_PortVlanMember[port_alias];
+    if (routed)
+    {
+        SWSS_LOG_NOTICE("PAC: %s becomes a routed port, leaving %zu VLAN(s)", port_alias.c_str(), vlans.size());
+        for (const auto& vlan : vlans)
+        {
+            const string& vlan_alias = vlan.first;
+            string stateKey = vlan_alias + '|' + port_alias;
+            if (!isVlanMemberStateOk(stateKey))
+            {
+                continue;
+            }
+            int vlan_id = stoi(vlan_alias.substr(4));
+            try
+            {
+                removeHostVlanMember(vlan_id, port_alias);
+            }
+            catch (const std::runtime_error& e)
+            {
+                SWSS_LOG_ERROR("PAC: failed to remove %s from %s in the kernel: %s",
+                               port_alias.c_str(), vlan_alias.c_str(), e.what());
+            }
+            m_appVlanMemberTableProducer.del(vlan_alias + ':' + port_alias);
+            m_stateVlanMemberTable.del(stateKey);
+        }
+        m_pacRoutedPorts.insert(port_alias);
+    }
+    else
+    {
+        SWSS_LOG_NOTICE("PAC: %s is released, restoring %zu VLAN(s)", port_alias.c_str(), vlans.size());
+        m_pacRoutedPorts.erase(port_alias);
+        for (const auto& vlan : vlans)
+        {
+            addPortToVlan(port_alias, vlan.first, vlan.second);
+        }
     }
 }
 

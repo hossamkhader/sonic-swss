@@ -29,7 +29,10 @@ private:
     std::set<std::string> m_vlanMemberReplay;
     bool replayDone;
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> m_PortVlanMember;
-    
+    /* Ports PAC has turned into routed ports: their configured VLAN memberships are kept in
+       m_PortVlanMember but not programmed until PAC releases the port again. */
+    std::set<std::string> m_pacRoutedPorts;
+
     void doTask(Consumer &consumer);
     void doVlanTask(Consumer &consumer);
     void doVlanMemberTask(Consumer &consumer);
@@ -51,6 +54,7 @@ private:
     void doVlanPacVlanMemberTask(Consumer &consumer);
     void addPortToVlan(const std::string& port_alias, const std::string& vlan_alias, const std::string& tagging_mode);
     void removePortFromVlan(const std::string& port_alias, const std::string& vlan_alias);
+    void pacRoutedPortSet(const std::string& port_alias, bool routed);
 };
 
 }
