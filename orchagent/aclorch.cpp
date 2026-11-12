@@ -64,6 +64,7 @@ acl_rule_attr_lookup_t aclMatchLookup =
     { MATCH_IN_PORTS,          SAI_ACL_ENTRY_ATTR_FIELD_IN_PORTS },
     { MATCH_OUT_PORT,          SAI_ACL_ENTRY_ATTR_FIELD_OUT_PORT },
     { MATCH_OUT_PORTS,         SAI_ACL_ENTRY_ATTR_FIELD_OUT_PORTS },
+    { MATCH_SRC_MAC,           SAI_ACL_ENTRY_ATTR_FIELD_SRC_MAC },
     { MATCH_SRC_IP,            SAI_ACL_ENTRY_ATTR_FIELD_SRC_IP },
     { MATCH_DST_IP,            SAI_ACL_ENTRY_ATTR_FIELD_DST_IP },
     { MATCH_SRC_IPV6,          SAI_ACL_ENTRY_ATTR_FIELD_SRC_IPV6 },
@@ -1040,7 +1041,7 @@ bool AclRule::validateAddMatch(string attr_name, string attr_value)
         {
             matchData.data.booldata = (to_upper(attr_value) == "TRUE");;
         }
-        else if (attr_name == MATCH_INNER_DST_MAC || attr_name == MATCH_INNER_SRC_MAC)
+        else if (attr_name == MATCH_SRC_MAC || attr_name == MATCH_INNER_DST_MAC || attr_name == MATCH_INNER_SRC_MAC)
         {
             swss::MacAddress mac(attr_value);
             swss::MacAddress mask(MAC_EXACT_MATCH);
